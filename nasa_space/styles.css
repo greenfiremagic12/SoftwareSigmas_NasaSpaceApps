@@ -64,7 +64,7 @@ nav a {
 #layers p, 
 #layers span, 
 #layers li {
-    color: #ffffff !important; /* Force all text white */
+    color: #ffffff !important;
 }
 
 #layers .btn {
@@ -76,5 +76,4 @@ nav a {
     background: #ffffff !important;
     color: #000 !important;
 }
-
   
