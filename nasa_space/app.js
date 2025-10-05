@@ -1,5 +1,9 @@
 // ---------------------------
-// app.js — heat points + NASA raster + chart matching map points
+// app.js — final consolidated version
+// - Reliable heat points (marker pane + visible styles)
+// - NASA GIBS raster with maxNativeZoom + clamp
+// - Keeps food/waste/polygons + NASA POWER points + chart
+// - Fallback heat test via USGS if no centroids found
 // ---------------------------
 
 // ---------- CONFIG ----------
@@ -17,12 +21,20 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '&copy; OpenStreetMap contributors'
 }).addTo(map);
 
+// Create a dedicated pane for point markers so they render above polygons
+if (!map.getPane('markerPane')) {
+  map.createPane('markerPane');
+  map.getPane('markerPane').style.zIndex = 650; // above overlayPane (400) and markerPane default (600)
+  map.getPane('markerPane').style.pointerEvents = 'auto';
+}
+
 // ---------- LAYERS & STATE ----------
 let foodLayer = null;
 let heatLayer = null;
 let wasteLayer = null;
 let nasaRasterLayer = null;
 let nasaPowerPointsLayer = null;
+let heatTestFallbackLayer = null; // optional fallback
 
 let chartReady = false;
 
@@ -49,12 +61,11 @@ function getLayerCount(layer){
   } catch(e){ wrn('getLayerCount err', e); return 0; }
 }
 
-// parse string geometries that sometimes come from Socrata
 function parseGeom(m){
   if (!m) return null;
   if (typeof m === 'object') return m;
   if (typeof m === 'string'){
-    try { return JSON.parse(m); } catch(e){ wrn('parseGeom not JSON'); return null; }
+    try { return JSON.parse(m); } catch(e){ /* not JSON */ return null; }
   }
   return null;
 }
@@ -63,10 +74,16 @@ function extractFirstCoordArray(obj){
   if (!obj) return null;
   if (Array.isArray(obj)) {
     if (obj.length >= 2 && typeof obj[0] === 'number' && typeof obj[1] === 'number') return [obj[0], obj[1]];
-    for (const c of obj){ const f = extractFirstCoordArray(c); if (f) return f; }
+    for (const c of obj){
+      const f = extractFirstCoordArray(c);
+      if (f) return f;
+    }
     return null;
   } else if (typeof obj === 'object') {
-    for (const k of Object.keys(obj)){ const f = extractFirstCoordArray(obj[k]); if (f) return f; }
+    for (const k of Object.keys(obj)){
+      const f = extractFirstCoordArray(obj[k]);
+      if (f) return f;
+    }
     return null;
   }
   return null;
@@ -76,7 +93,7 @@ function averageLngLat(coordsArray){
   if (!coordsArray || !coordsArray.length) return null;
   let sx=0, sy=0, n=0;
   for (const c of coordsArray){
-    if (!Array.isArray(c) || c.length<2) continue;
+    if (!Array.isArray(c) || c.length < 2) continue;
     const [lng, lat] = c;
     if (!isFinite(lng) || !isFinite(lat)) continue;
     sx += lng; sy += lat; n++;
@@ -91,38 +108,57 @@ function getFeatureCentroid(feature){
   geom = parseGeom(geom);
   if (!geom) return null;
   const t = geom.type;
-  if (t === 'Point' && Array.isArray(geom.coordinates)){ const [lng,lat] = geom.coordinates; return (isFinite(lat)&&isFinite(lng)) ? [lat,lng] : null; }
-  if (t === 'MultiPoint' && Array.isArray(geom.coordinates) && geom.coordinates[0]){ const [lng,lat] = geom.coordinates[0]; return (isFinite(lat)&&isFinite(lng)) ? [lat,lng] : null; }
-  if (t === 'Polygon' && Array.isArray(geom.coordinates)){ const outer = geom.coordinates[0] || []; return averageLngLat(outer); }
-  if (t === 'MultiPolygon' && Array.isArray(geom.coordinates)){ const firstPoly = geom.coordinates[0]; const outer = Array.isArray(firstPoly) ? (firstPoly[0]||[]) : []; return averageLngLat(outer); }
+  if (t === 'Point' && Array.isArray(geom.coordinates)){
+    const [lng, lat] = geom.coordinates;
+    return (isFinite(lat) && isFinite(lng)) ? [lat, lng] : null;
+  }
+  if (t === 'MultiPoint' && Array.isArray(geom.coordinates) && geom.coordinates[0]){
+    const [lng, lat] = geom.coordinates[0];
+    return (isFinite(lat) && isFinite(lng)) ? [lat, lng] : null;
+  }
+  if (t === 'Polygon' && Array.isArray(geom.coordinates)){
+    const outer = geom.coordinates[0] || [];
+    return averageLngLat(outer);
+  }
+  if (t === 'MultiPolygon' && Array.isArray(geom.coordinates)){
+    const firstPoly = geom.coordinates[0]; const outer = Array.isArray(firstPoly) ? (firstPoly[0] || []) : [];
+    return averageLngLat(outer);
+  }
   if (t === 'GeometryCollection' && Array.isArray(geom.geometries)){
     for (const g of geom.geometries){
       if (!g) continue;
-      if (g.type === 'Point' && Array.isArray(g.coordinates)){ const [lng,lat] = g.coordinates; return (isFinite(lat)&&isFinite(lng)) ? [lat,lng] : null; }
-      if (g.type === 'Polygon' && Array.isArray(g.coordinates) && g.coordinates[0]) return averageLngLat(g.coordinates[0]);
+      if (g.type === 'Point' && Array.isArray(g.coordinates)){
+        const [lng, lat] = g.coordinates;
+        if (isFinite(lat) && isFinite(lng)) return [lat, lng];
+      }
+      if (g.type === 'Polygon' && Array.isArray(g.coordinates) && g.coordinates[0]) {
+        return averageLngLat(g.coordinates[0]);
+      }
     }
   }
   const first = extractFirstCoordArray(geom);
-  if (first){ const [lng,lat] = first; return (isFinite(lat)&&isFinite(lng)) ? [lat,lng] : null; }
+  if (first){
+    const [lng, lat] = first;
+    return (isFinite(lat) && isFinite(lng)) ? [lat, lng] : null;
+  }
   return null;
 }
 
-function getHeatColor(score){ return score>75? '#d73027' : score>50? '#fc8d59' : score>25? '#fee08b' : '#ffffbf'; }
+function getHeatColor(score){ return score > 75 ? '#d73027' : score > 50 ? '#fc8d59' : score > 25 ? '#fee08b' : '#ffffbf'; }
 
-// ---------- LOAD LAYERS: WASTE / FOOD / HEAT ----------
+// ---------- LOAD LAYERS ----------
 async function loadWasteLayer(){
   try {
     const res = await fetch(WASTE_URL);
     if (!res.ok) throw new Error(`Waste fetch HTTP ${res.status}`);
     const data = await res.json();
-    dbg('waste fetched', (data && data.features)? `${data.features.length} features` : data);
+    dbg('waste fetched', (data && data.features) ? `${data.features.length} features` : data);
 
-    // clear wastePoints array
     wastePoints.length = 0;
 
     const geo = L.geoJSON(data, {
       style: { color:'#666', weight:1, fillOpacity:0.15 },
-      pointToLayer: (f, latlng) => L.circleMarker(latlng, { radius:6, fillColor:'#888', color:'#555', fillOpacity:0.9 }),
+      pointToLayer: (f, latlng) => L.circleMarker(latlng, { radius:6, fillColor:'#888', color:'#555', fillOpacity:0.9, pane: 'markerPane' }),
       onEachFeature: (f, l) => {
         const name = f.properties?.name ?? f.properties?.facility ?? 'Unknown';
         const info = f.properties?.tons_per_day ?? f.properties?.description ?? '';
@@ -137,12 +173,13 @@ async function loadWasteLayer(){
       const [lat,lng] = c;
       const tons = f.properties?.tons_per_day ? Number(f.properties.tons_per_day) : null;
       const popup = `<strong>${f.properties?.name ?? f.properties?.facility ?? 'Waste'}</strong><br>${tons ?? f.properties?.description ?? ''}`;
-      const m = L.circleMarker([lat,lng], { radius:6, fillColor:'#888', color:'#111', weight:1, fillOpacity:0.9 }).bindPopup(popup);
+      const m = L.circleMarker([lat,lng], { radius:7, fillColor:'#888', color:'#111', weight:1.2, fillOpacity:0.95, pane:'markerPane' }).bindPopup(popup);
       pointLayer.addLayer(m);
-
-      // store for chart aggregation
       wastePoints.push({ name: f.properties?.name ?? f.properties?.facility ?? `waste-${i}`, lat, lon: lng, tons });
     });
+
+    // keep markers above polygons
+    pointLayer.eachLayer(l => { if (l && l.bringToFront) try { l.bringToFront(); } catch(e){} });
 
     wasteLayer = L.layerGroup([geo, pointLayer]);
     dbg('waste layer ready — markers:', getLayerCount(wasteLayer));
@@ -163,9 +200,9 @@ async function loadFoodLayer(){
 
     const geo = L.geoJSON(data, {
       style: { color:'#00d4ff', weight:2, fillColor:'#00d4ff', fillOpacity:0.25 },
-      pointToLayer: (f, latlng) => L.circleMarker(latlng, { radius:5, fillColor:'#00d4ff', color:'#003b4d', fillOpacity:0.95 }),
+      pointToLayer: (f, latlng) => L.circleMarker(latlng, { radius:5, fillColor:'#00d4ff', color:'#003b4d', fillOpacity:0.95, pane: 'markerPane' }),
       onEachFeature: (f,l) => {
-        const name = f.properties?.businessname ?? f.properties?.name ?? 'Food Access';
+        const name = f.properties?.businessname ?? f.properties?.name ?? 'Food';
         const score = f.properties?.score ?? f.properties?.type ?? '';
         l.bindPopup(`<strong>${name}</strong><br>${score}`);
       }
@@ -178,11 +215,12 @@ async function loadFoodLayer(){
       const [lat,lng] = c;
       const score = (f.properties && (f.properties.score || f.properties.score === 0)) ? Number(f.properties.score) : null;
       const popup = `<strong>${f.properties?.businessname ?? f.properties?.name ?? 'Unknown'}</strong><br>${score ?? f.properties?.type ?? ''}`;
-      const m = L.circleMarker([lat,lng], { radius:6, fillColor:'#00d4ff', color:'#002b3a', weight:1, fillOpacity:0.95 }).bindPopup(popup);
+      const m = L.circleMarker([lat,lng], { radius:7, fillColor:'#00d4ff', color:'#002b3a', weight:1.2, fillOpacity:0.95, pane:'markerPane' }).bindPopup(popup);
       pointLayer.addLayer(m);
-
       foodPoints.push({ name: f.properties?.businessname ?? f.properties?.name ?? `food-${i}`, lat, lon: lng, score });
     });
+
+    pointLayer.eachLayer(l => { if (l && l.bringToFront) try { l.bringToFront(); } catch(e){} });
 
     foodLayer = L.layerGroup([geo, pointLayer]);
     dbg('food layer ready — markers:', getLayerCount(foodLayer));
@@ -201,13 +239,11 @@ async function loadHeatLayer(){
 
     heatPoints.length = 0;
 
-    // normalize features (some APIs already return geojson)
+    // normalize and find centroid
     const normalized = (data.features || []).map(f => {
       const g = parseGeom(f.geometry ?? f.the_geom ?? null);
       if (!g) return null;
-      // copy small set of properties; dataset may use different field names
       const props = Object.assign({}, f.properties ?? f);
-      // try common name fields
       props.hvi_score = props.hvi_score ?? props.HVI ?? props.hvi ?? props.hviScore ?? null;
       return { type:'Feature', properties: props, geometry: g };
     }).filter(Boolean);
@@ -223,35 +259,71 @@ async function loadHeatLayer(){
     (geojson.features || []).forEach((f,i) => {
       const c = getFeatureCentroid(f);
       if (!c) { wrn('heat feature missing geometry', i, f.properties); return; }
-      const [lat,lng] = c;
+      const [lat, lng] = c;
       const score = (f.properties && (f.properties.hvi_score || f.properties.hvi_score === 0)) ? Number(f.properties.hvi_score) : null;
       const popup = `<strong>${f.properties?.neighborhood ?? 'Unknown'}</strong><br>HVI: ${score ?? 'N/A'}`;
-      const m = L.circleMarker([lat,lng], { radius:7, fillColor:getHeatColor(score ?? 0), color:'#111', weight:0.8, fillOpacity:0.95 })
+      const m = L.circleMarker([lat,lng], { radius:9, fillColor:getHeatColor(score ?? 0), color:'#111', weight:1.4, fillOpacity:0.98, pane:'markerPane' })
         .bindPopup(popup);
       pointLayer.addLayer(m);
-
       heatPoints.push({ name: f.properties?.neighborhood ?? `heat-${i}`, lat, lon: lng, hvi: score });
     });
 
+    // ensure markers drawn above polygons
+    pointLayer.eachLayer(l => { if (l && l.bringToFront) try { l.bringToFront(); } catch(e){} });
+
     heatLayer = L.layerGroup([geo, pointLayer]);
-    dbg('heat layer ready — markers:', getLayerCount(heatLayer));
+    dbg('heat layer ready — markers:', getLayerCount(heatLayer), 'heatPoints:', heatPoints.length);
+
+    // if no centroids were created, load fallback test (USGS) so you can confirm markers render
+    if (heatPoints.length === 0) {
+      wrn('No heat centroids found — loading test point feed (USGS earthquakes) for visibility testing.');
+      await loadHeatTestFallback();
+    }
   } catch (err){
     console.error('Heat load error', err);
     heatLayer = safeLayerGroup();
   } finally { updateAllAggregatesAndChart(); }
 }
 
+// --- Fallback test: USGS earthquakes feed (points) so we can verify marker rendering separately
+async function loadHeatTestFallback(){
+  try {
+    const url = 'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson';
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`USGS HTTP ${res.status}`);
+    const data = await res.json();
+    dbg('USGS fallback loaded', (data && data.features) ? `${data.features.length} features` : data);
+
+    const geo = L.geoJSON(data, {
+      pointToLayer: (f, latlng) => L.circleMarker(latlng, { radius:8, fillColor:'#ffcc00', color:'#8a5c00', weight:1.2, fillOpacity:0.95, pane:'markerPane' }),
+      onEachFeature: (f, l) => l.bindPopup(`<strong>${f.properties?.place ?? 'Quake'}</strong><br>Mag: ${f.properties?.mag ?? 'N/A'}`)
+    });
+
+    // store as a separate fallback layer (so we don't confuse the real heat data)
+    heatTestFallbackLayer = L.layerGroup([geo]);
+    dbg('heat test fallback layer ready with', getLayerCount(heatTestFallbackLayer), 'markers');
+
+    // If the real heatLayer is empty, add fallback to map (and show a message)
+    if ((!heatLayer || getLayerCount(heatLayer) === 0) && map) {
+      map.addLayer(heatTestFallbackLayer);
+      console.info('[APP] USGS test layer added to map as a visual fallback (heat had no centroids).');
+    }
+  } catch (err) {
+    console.error('Heat test fallback error', err);
+  }
+}
+
 // ---------- NASA GIBS RASTER ----------
 function buildGibsTemplate(dateISO){
-  // Use GoogleMapsCompatible_Level9 to fit Leaflet zoom levels; dateISO format 'YYYY-MM-DD'
   return `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_SNPP_CorrectedReflectance_TrueColor/default/${dateISO}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg`;
 }
 function ensureNasaRaster(){
   if (nasaRasterLayer) return;
   const dateISO = new Date().toISOString().slice(0,10);
   const tpl = buildGibsTemplate(dateISO);
-  nasaRasterLayer = L.tileLayer(tpl, { maxZoom: 9, minZoom: 2, attribution: 'NASA GIBS' });
-  dbg('NASA raster prepared for', dateISO);
+  // Using maxNativeZoom tells Leaflet tiles only exist up to z=9 — Leaflet will scale them if map zooms higher
+  nasaRasterLayer = L.tileLayer(tpl, { minZoom: 2, maxNativeZoom: 9, maxZoom: 19, attribution: 'NASA GIBS' });
+  dbg('NASA raster prepared (template):', tpl, 'maxNativeZoom=9');
 }
 
 // ---------- NASA POWER POINTS ----------
@@ -278,7 +350,7 @@ async function loadNasaPowerPoints(){
       const avgMax = tMaxVals.length ? (tMaxVals.reduce((a,b)=>a+b,0)/tMaxVals.length).toFixed(1) : 'N/A';
       const avgMin = tMinVals.length ? (tMinVals.reduce((a,b)=>a+b,0)/tMinVals.length).toFixed(1) : 'N/A';
       const popup = `<strong>${p.name}</strong><br>Avg T2M_MAX: ${avgMax} °C<br>Avg T2M_MIN: ${avgMin} °C`;
-      const m = L.circleMarker([p.lat,p.lon], { radius:7, fillColor:'#ffd24d', color:'#6b4500', weight:1, fillOpacity:0.95 }).bindPopup(popup);
+      const m = L.circleMarker([p.lat,p.lon], { radius:7, fillColor:'#ffd24d', color:'#6b4500', weight:1, fillOpacity:0.95, pane:'markerPane' }).bindPopup(popup);
       g.addLayer(m);
       dbg('NASA POWER point added', p.name);
     } catch(err){ console.error('POWER point error', p.name, err); }
@@ -354,45 +426,31 @@ function createHeatLegend(){
   c.addTo(map);
 }
 
-// ---------- AGGREGATION & CHART UPDATES ----------
+// ---------- AGGREGATION & CHART (kept mostly same) ----------
 function computeAggregates(){
-  // heat avg HVI (0-100)
   const heatVals = heatPoints.map(p => p.hvi).filter(v => v !== null && !isNaN(v));
   const avgHeat = heatVals.length ? (heatVals.reduce((a,b)=>a+b,0)/heatVals.length) : null;
-
-  // food: average score if present, otherwise count
   const foodScores = foodPoints.map(p => p.score).filter(v => v !== null && !isNaN(v));
   const avgFoodScore = foodScores.length ? (foodScores.reduce((a,b)=>a+b,0) / foodScores.length) : null;
   const foodCount = foodPoints.length;
-
-  // waste: total tons (sum of tons fields)
   const wasteTons = wastePoints.map(p => p.tons).filter(v => v !== null && !isNaN(v));
   const totalWaste = wasteTons.length ? wasteTons.reduce((a,b)=>a+b,0) : null;
-
-  return {
-    avgHeat, avgFoodScore, foodCount, totalWaste
-  };
+  return { avgHeat, avgFoodScore, foodCount, totalWaste };
 }
 
 function updateAggregatesChart(){
   if (!chartReady) return;
   const agg = computeAggregates();
-
-  // Prepare values for right-axis traces (traces 2,3,4)
   const heatY = agg.avgHeat !== null ? [Number(agg.avgHeat.toFixed(1))] : [0];
   const foodY = agg.avgFoodScore !== null ? [Number(agg.avgFoodScore.toFixed(2))] : [agg.foodCount || 0];
   const wasteY = agg.totalWaste !== null ? [Number(agg.totalWaste.toFixed(1))] : [0];
-
   const heatText = agg.avgHeat !== null ? [`${agg.avgHeat.toFixed(1)} (avg HVI)`] : ['N/A'];
   const foodText = agg.avgFoodScore !== null ? [`${agg.avgFoodScore.toFixed(2)} (avg score)`] : [`${agg.foodCount} features`];
   const wasteText = agg.totalWaste !== null ? [`${agg.totalWaste.toFixed(1)} tons/day`] : ['N/A'];
-
   try {
     Plotly.restyle('chart', { y: [heatY], text: [heatText] }, [2]);
     Plotly.restyle('chart', { y: [foodY], text: [foodText] }, [3]);
     Plotly.restyle('chart', { y: [wasteY], text: [wasteText] }, [4]);
-
-    // adjust right axis range based on values: use max of metrics scaled
     const rightMax = Math.max(100, heatY[0]*1.2, foodY[0]*1.2, wasteY[0]*1.2, 10);
     Plotly.relayout('chart', { 'yaxis2.range': [0, rightMax] });
     dbg('Aggregates updated', { agg, rightMax });
@@ -407,7 +465,7 @@ function updateAllAggregatesAndChart(){
   updateAggregatesChart();
 }
 
-// ---------- PLOTLY CHART INITIALIZATION ----------
+// ---------- PLOTLY CHART ----------
 async function getNasaPowerDataForNYC(){
   const lat=40.7128, lon=-74.0060;
   const url = `https://power.larc.nasa.gov/api/temporal/daily/point?parameters=T2M_MAX,T2M_MIN&community=RE&longitude=${lon}&latitude=${lat}&start=${NASA_POWER_START}&end=${NASA_POWER_END}&format=JSON`;
@@ -431,7 +489,7 @@ function toggleChartTraceVisibility(traceIndex, visible){
 function updateLayerCounts(){
   if (chartReady){
     try {
-      Plotly.restyle('chart', { y: [[getLayerCount(foodLayer)]] }, [2]); // note: initial design kept counts here for backward compatibility
+      Plotly.restyle('chart', { y: [[getLayerCount(foodLayer)]] }, [2]);
       Plotly.restyle('chart', { y: [[getLayerCount(heatLayer)]] }, [3]);
       Plotly.restyle('chart', { y: [[getLayerCount(wasteLayer)]] }, [4]);
     } catch(e){ /* ignore if chart not ready */ }
@@ -442,19 +500,14 @@ function updateLayerCounts(){
 async function initCharts(){
   try {
     const nasa = await getNasaPowerDataForNYC();
-
-    // initial aggregated metrics
     const agg = computeAggregates();
     const heatBar = agg.avgHeat !== null ? [Number(agg.avgHeat.toFixed(1))] : [0];
     const foodBar = agg.avgFoodScore !== null ? [Number(agg.avgFoodScore.toFixed(2))] : [agg.foodCount || 0];
     const wasteBar = agg.totalWaste !== null ? [Number(agg.totalWaste.toFixed(1))] : [0];
 
     const traces = [
-      // NASA temps (left axis)
       { x: nasa.dates, y: nasa.tMax, type:'scatter', name:'Max Temp (°C)', line:{ color:'#ff5e5e' }, yaxis: 'y' },
       { x: nasa.dates, y: nasa.tMin, type:'scatter', name:'Min Temp (°C)', line:{ color:'#00d4ff' }, yaxis: 'y' },
-
-      // Aggregated map metrics (right axis)
       { x: ['Avg HVI'], y: heatBar, type:'bar', name:'Heat (avg HVI)', marker:{ color:'#ff5e5e' }, text: heatBar.map(v=>v ? `${v}` : 'N/A'), textposition:'auto', hovertemplate:'Heat avg HVI: %{y}<extra></extra>', yaxis: 'y2', visible: true },
       { x: ['Food'], y: foodBar, type:'bar', name:'Food (avg score / count)', marker:{ color:'#00d4ff' }, text: foodBar.map(v=>v ? `${v}` : 'N/A'), textposition:'auto', hovertemplate:'Food avg score / count: %{y}<extra></extra>', yaxis: 'y2', visible: true },
       { x: ['Waste'], y: wasteBar, type:'bar', name:'Waste (total tons/day)', marker:{ color:'#888' }, text: wasteBar.map(v=>v ? `${v}` : 'N/A'), textposition:'auto', hovertemplate:'Waste total tons/day: %{y}<extra></extra>', yaxis: 'y2', visible: true }
@@ -479,26 +532,22 @@ async function initCharts(){
   } catch(err){ console.error('initCharts failed', err); }
 }
 
-// ---------- INIT: build layers and wire UI ----------
+// ---------- INIT: load layers & wire UI ----------
 async function initNYCLayers(){
-  // load data layers
   await Promise.all([ loadWasteLayer(), loadFoodLayer(), loadHeatLayer() ]);
 
-  // DOM toggles
   toggleFoodEl = document.getElementById('toggleFood');
   toggleHeatEl = document.getElementById('toggleHeat');
   toggleWasteEl = document.getElementById('toggleWaste');
   toggleNASARasterEl = document.getElementById('toggleNASARaster');
   toggleNASAGeoEl = document.getElementById('toggleNASAGeo');
 
-  // indicators + legend
   createIndicatorsControl();
   createHeatLegend();
 
-  // prepare NASA raster (tile template uses today's date)
   ensureNasaRaster();
 
-  // hook indicator clicks to checkboxes
+  // indicator clicks toggle checkboxes
   const rowF = document.getElementById('indicator-food');
   const rowH = document.getElementById('indicator-heat');
   const rowW = document.getElementById('indicator-waste');
@@ -506,31 +555,38 @@ async function initNYCLayers(){
   if (rowH) rowH.addEventListener('click', ()=>{ if(!toggleHeatEl) return; toggleHeatEl.checked = !toggleHeatEl.checked; toggleHeatEl.dispatchEvent(new Event('change')); });
   if (rowW) rowW.addEventListener('click', ()=>{ if(!toggleWasteEl) return; toggleWasteEl.checked = !toggleWasteEl.checked; toggleWasteEl.dispatchEvent(new Event('change')); });
 
-  // safe add/remove helpers
   const safeAdd = l => { if (l && !map.hasLayer(l)) map.addLayer(l); };
   const safeRemove = l => { if (l && map.hasLayer(l)) map.removeLayer(l); };
 
-  // wire main toggles
   if (toggleFoodEl) toggleFoodEl.addEventListener('change', e => { e.target.checked ? safeAdd(foodLayer) : safeRemove(foodLayer); updateAllAggregatesAndChart(); toggleChartTraceVisibility(3, e.target.checked); });
   if (toggleHeatEl) toggleHeatEl.addEventListener('change', e => { e.target.checked ? safeAdd(heatLayer) : safeRemove(heatLayer); updateAllAggregatesAndChart(); toggleChartTraceVisibility(2, e.target.checked); });
   if (toggleWasteEl) toggleWasteEl.addEventListener('change', e => { e.target.checked ? safeAdd(wasteLayer) : safeRemove(wasteLayer); updateAllAggregatesAndChart(); toggleChartTraceVisibility(4, e.target.checked); });
 
-  // NASA raster toggle
-  if (toggleNASARasterEl) toggleNASARasterEl.addEventListener('change', e => { if (e.target.checked) { ensureNasaRaster(); safeAdd(nasaRasterLayer); } else safeRemove(nasaRasterLayer); });
-
-  // NASA POWER points toggle (lazy load)
-  if (toggleNASAGeoEl) toggleNASAGeoEl.addEventListener('change', async e => {
-    if (e.target.checked) { if (!nasaPowerPointsLayer) await loadNasaPowerPoints(); safeAdd(nasaPowerPointsLayer); } else if (nasaPowerPointsLayer) safeRemove(nasaPowerPointsLayer);
+  if (toggleNASARasterEl) toggleNASARasterEl.addEventListener('change', e => {
+    if (e.target.checked) {
+      ensureNasaRaster();
+      // clamp zoom to native if map currently higher than native tiles
+      if (map.getZoom() > 9) {
+        dbg('Map zoom > 9; setting to 9 so NASA tiles (maxNativeZoom=9) display correctly');
+        map.setZoom(9);
+      }
+      safeAdd(nasaRasterLayer);
+    } else safeRemove(nasaRasterLayer);
   });
 
-  // add defaults according to checked state
+  if (toggleNASAGeoEl) toggleNASAGeoEl.addEventListener('change', async e => {
+    if (e.target.checked) {
+      if (!nasaPowerPointsLayer) await loadNasaPowerPoints();
+      safeAdd(nasaPowerPointsLayer);
+    } else if (nasaPowerPointsLayer) safeRemove(nasaPowerPointsLayer);
+  });
+
   if (toggleFoodEl?.checked) safeAdd(foodLayer);
   if (toggleHeatEl?.checked) safeAdd(heatLayer);
   if (toggleWasteEl?.checked) safeAdd(wasteLayer);
   if (toggleNASARasterEl?.checked) { ensureNasaRaster(); safeAdd(nasaRasterLayer); }
   if (toggleNASAGeoEl?.checked) { await loadNasaPowerPoints(); safeAdd(nasaPowerPointsLayer); }
 
-  // fit map to present layers (if any)
   const present = [foodLayer, heatLayer, wasteLayer, nasaPowerPointsLayer].filter(l => l && l.getLayers && l.getLayers().length > 0);
   if (present.length){
     try { const group = L.featureGroup(present); map.fitBounds(group.getBounds(), { padding:[20,20] }); } catch(e){ wrn('fitBounds failed', e); }
@@ -545,6 +601,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   try {
     await initNYCLayers();
     await initCharts();
-  } catch (err){ console.error('Initialization error', err); }
+  } catch (err){ console.error('Initialization error:', err); }
 });
 
