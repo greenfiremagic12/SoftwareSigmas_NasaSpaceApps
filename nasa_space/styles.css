@@ -76,3 +76,48 @@ nav a {
     background: #ffffff !important;
     color: #000 !important;
 }
+
+/* Team section styles */
+.team-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.team-card {
+  background: #0f1620;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,0.04);
+  box-shadow: 0 6px 18px rgba(0,0,0,0.6);
+}
+
+.team-photo img {
+  display: block;
+  width: 100%;
+  height: 160px;
+  object-fit: cover;
+}
+
+.team-info {
+  padding: 12px;
+}
+
+.team-info h4 {
+  margin: 0 0 6px 0;
+  color: #00d4ff;
+}
+
+.team-info p {
+  margin: 0;
+  color: #d1f0ff;
+  font-size: 14px;
+  line-height: 1.3;
+}
+
+/* small responsive adjustments */
+@media (max-width: 900px) {
+  #map-and-controls { flex-direction: column; }
+  #map { height: 400px; }
+}
