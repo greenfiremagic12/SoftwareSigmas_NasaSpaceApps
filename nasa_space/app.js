@@ -214,7 +214,7 @@ async function loadFoodLayer(){
       if (!c) { wrn('food feature missing geometry', i, f.properties); return; }
       const [lat,lng] = c;
       const score = (f.properties && (f.properties.score || f.properties.score === 0)) ? Number(f.properties.score) : null;
-      const popup = `<strong>${f.properties?.businessname ?? f.properties?.name ?? 'Unknown'}</strong><br>${score ?? f.properties?.type ?? ''}`;
+      const popup = `<strong>${f.properties?.businessname ?? f.properties?.name ?? 'Food'}</strong><br>${score ?? f.properties?.type ?? ''}`;
       const m = L.circleMarker([lat,lng], { radius:7, fillColor:'#00d4ff', color:'#002b3a', weight:1.2, fillOpacity:0.95, pane:'markerPane' }).bindPopup(popup);
       pointLayer.addLayer(m);
       foodPoints.push({ name: f.properties?.businessname ?? f.properties?.name ?? `food-${i}`, lat, lon: lng, score });
@@ -518,12 +518,21 @@ async function initCharts(){
       paper_bgcolor: "#0b0c10",
       plot_bgcolor: "#0b0c10",
       font: { color: "#d1f0ff", family: "Orbitron" },
-      xaxis: { title: "Date / Category", automargin: true },
+      xaxis: {
+        title: { text: "Date / Category", standoff: 30 }, // 👈 pushes label further down
+        automargin: true
+      },
       yaxis: { title: "Temperature (°C)", automargin: true },
-      yaxis2: { title: "Map metrics (see units)", overlaying: 'y', side: 'right', automargin: true, range: [0, Math.max(100, heatBar[0]*1.2, foodBar[0]*1.2, wasteBar[0]*1.2, 10)] },
-      legend: { orientation: 'h', x: 0, y: -0.2 },
-      margin: { t: 60, b: 80 }
+      yaxis2: {
+        title: "Map metrics (see units)",
+        overlaying: 'y',
+        side: 'right',
+        automargin: true
+      },
+      legend: { orientation: 'h', x: 0, y: -0.3 }, // 👈 move legend slightly lower if needed
+      margin: { t: 60, b: 120 } // 👈 add more bottom space
     };
+    
 
     Plotly.newPlot('chart', traces, layout, { responsive: true });
     chartReady = true;
