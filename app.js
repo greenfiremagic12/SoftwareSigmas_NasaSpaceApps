@@ -514,7 +514,7 @@ async function initCharts(){
     ];
 
     const layout = {
-      title: "NASA POWER: NYC Temperature (°C) — map metrics (right axis)",
+      title: "NASA POWER: NYC Temperature (°C)",
       paper_bgcolor: "#0b0c10",
       plot_bgcolor: "#0b0c10",
       font: { color: "#d1f0ff", family: "Orbitron" },
