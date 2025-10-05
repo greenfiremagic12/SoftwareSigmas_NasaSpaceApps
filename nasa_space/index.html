@@ -40,6 +40,89 @@
         </div>
       </div>
     </section>
+    <!-- ===================== -->
+<!-- FOCUS AREAS SECTION -->
+<!-- ===================== -->
+<section id="focus-areas" class="container card" style="margin-top:40px; padding:20px;">
+    <h3>Focus Areas — Building a Resilient, Healthy New York</h3>
+    <p>Our project targets three interconnected urban challenges using NASA Earth observation and NYC Open Data.</p>
+  
+    <div class="row" style="margin-top:20px;">
+      <!-- Food Access -->
+      <div class="col-md-4 mb-4">
+        <div class="card h-100" style="background:#121826; padding:15px; border:none;">
+          <h4>🥦 Food Access</h4>
+          <p><strong>Challenge:</strong> Thousands of New Yorkers live in “food deserts” with limited access to affordable, nutritious food.</p>
+          <p><strong>Data:</strong> NYC Food Access dataset combined with NASA POWER temperature and solar data.</p>
+          <p><strong>Goal:</strong> Identify overlap between heat stress and poor food access to guide cooling and food security initiatives.</p>
+        </div>
+      </div>
+  
+      <!-- Heat Islands -->
+      <div class="col-md-4 mb-4">
+        <div class="card h-100" style="background:#121826; padding:15px; border:none;">
+          <h4>🌡️ Urban Heat Islands</h4>
+          <p><strong>Challenge:</strong> Dense infrastructure creates localized heat zones, worsening health risks during summer.</p>
+          <p><strong>Data:</strong> NASA MODIS thermal imagery and NYC Heat Vulnerability Index zones.</p>
+          <p><strong>Goal:</strong> Support equitable climate resilience by highlighting “hot spots” needing cooling centers and green spaces.</p>
+        </div>
+      </div>
+  
+      <!-- Waste Management -->
+      <div class="col-md-4 mb-4">
+        <div class="card h-100" style="background:#121826; padding:15px; border:none;">
+          <h4>🗑️ Waste Management</h4>
+          <p><strong>Challenge:</strong> Waste transfer stations are concentrated near low-income neighborhoods.</p>
+          <p><strong>Data:</strong> NYC Waste Facility dataset integrated with NASA environmental indicators.</p>
+          <p><strong>Goal:</strong> Promote fairer zoning and circular economy planning through data transparency.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+  
+  <!-- ===================== -->
+  <!-- DATA & METHODS SECTION -->
+  <!-- ===================== -->
+  <section id="data-methods" class="container card" style="margin-top:40px; padding:20px;">
+    <h3>Data & Methods — How We Built Smart New York</h3>
+    <p>We combined open-source datasets and satellite observations to visualize NYC’s environmental and social landscape.</p>
+  
+    <!-- Data Sources -->
+    <h4 style="margin-top:20px;">1️⃣ Data Sources</h4>
+    <ul>
+      <li><strong>NASA POWER API:</strong> Daily surface temperature and solar irradiance data.</li>
+      <li><strong>NASA MODIS / Terra Imagery:</strong> Land surface temperature and vegetation indices.</li>
+      <li><strong>NYC Open Data:</strong> Food Access, Heat Vulnerability, and Waste Management datasets.</li>
+    </ul>
+  
+    <!-- Integration -->
+    <h4 style="margin-top:20px;">2️⃣ Data Integration & Visualization</h4>
+    <p>Data was converted to GeoJSON for mapping in <strong>Leaflet.js</strong> and charting in <strong>Plotly.js</strong>. We overlaid NASA datasets with NYC layers to identify correlations between heat, food, and waste patterns.</p>
+  
+    <!-- Insights -->
+    <h4 style="margin-top:20px;">3️⃣ Analytical Insights</h4>
+    <ul>
+      <li>Mapped overlap between high-heat zones and food deserts.</li>
+      <li>Visualized waste site density in heat-vulnerable regions.</li>
+      <li>Created interactive NASA-powered visualizations for public insight.</li>
+    </ul>
+  
+    <!-- Tools -->
+    <h4 style="margin-top:20px;">4️⃣ Tools & Frameworks</h4>
+    <p>Our stack integrates modern web technologies and open APIs:</p>
+    <ul>
+      <li>🌍 <strong>Leaflet.js</strong> — Interactive mapping</li>
+      <li>📈 <strong>Plotly.js</strong> — Data visualization</li>
+      <li>🛰️ <strong>NASA POWER & MODIS APIs</strong> — Satellite observations</li>
+      <li>🏙️ <strong>NYC Open Data</strong> — Urban datasets</li>
+      <li>💻 <strong>Bootstrap / HTML / CSS / JS</strong> — Responsive design</li>
+    </ul>
+  
+    <p style="margin-top:20px;">
+      <strong>Outcome:</strong> This integration of NASA science with city data offers decision-makers a unified dashboard to identify inequities and plan resilient, sustainable interventions.
+    </p>
+  </section>
+  
 
     <section id="dashboard" class="container card">
       <h3>Interactive Dashboard</h3>
