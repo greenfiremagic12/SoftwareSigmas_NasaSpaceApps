@@ -81,12 +81,24 @@ nav a {
     color: #000 !important;
 }
 
+#make-blue {
+  color: #00d4ff;
+}
+
+.col-md-4 {
+  color: #00d4ff;
+}
+
 /* Team section styles */
 .team-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: 16px;
   margin-top: 12px;
+}
+
+.card {
+  color: #00d4ff;
 }
 
 .team-card {
