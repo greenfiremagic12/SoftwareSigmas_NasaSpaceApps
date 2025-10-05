@@ -15,6 +15,10 @@ header {
     text-align: center;
 }
 
+label {
+  color: #00d4ff;
+}
+
 nav a {
     color: #00d4ff;
     margin: 0 10px;
